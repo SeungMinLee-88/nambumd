@@ -182,3 +182,102 @@ print(documents)
 - LangChain 기반으로 발전해 온 생태계에서 한 단계 더 나아가서 **에이전트-기반 구조, 상태ful 워크플로우** 등이 실험 가능한 수준으로 소개된다는 점에서 기술적 전환점으로 볼 수 있습니다.
     
 - 실제로 개발자들에게 “이런 구조로 만들면 더 자연스럽고 강력한 애플리케이션이 가능하다”는 인사이트를 준다는 점에서 실무적 가치도 높습니다.
+---
+# 1) 예제 코드로 이해하는 LangGraph (요지정리)
+
+아래는 공식 Quickstart가 보여주는 **계산기 에이전트** 패턴의 핵심입니다. 포인트는 “**그래프 상태(State)** 를 돌려 쓰면서, **조건부 에지**로 루프를 만들고, **도구 호출**이 있으면 반복하는” 구조예요.
+
+- **설치 & 헬로월드 스케치**  
+    `pip install -U langgraph` 후, `StateGraph`에 노드와 에지를 추가하고 `compile()`→`invoke()` 흐름으로 실행합니다. 예: `START → mock_llm → END` 같은 가장 단순한 그래프부터 시작. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+    
+- **도구 준비 & 모델 바인딩**  
+    (덧셈/곱셈/나눗셈) `@tool` 함수들을 정의하고 `model.bind_tools(tools)`로 LLM에 연결합니다. LLM이 **툴콜**을 만들면, 이후 노드가 실제 함수를 실행해 결과를 메시지로 돌려줍니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+- **상태 정의**  
+    그래프의 상태는 `messages`(대화 히스토리)와 `llm_calls`(호출 카운트) 같은 키를 포함할 수 있고, `Annotated[..., operator.add]`로 **메시지 누적**을 간단히 표현합니다. (새 메시지가 들어올 때 append) [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+- **모델 노드**  
+    `llm_call(state)`에서 LLM을 한 번 호출합니다. 이때 LLM이 도구를 쓰라고 결정할 수도, 그냥 답을 낼 수도 있음. 호출 결과는 상태의 `messages`에 합쳐집니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+- **툴 노드**  
+    직전 메시지의 `tool_calls`를 순회하면서 실제 파이썬 함수(툴)를 실행하고, 그 결과를 `ToolMessage`로 상태에 추가합니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+- **조건부 에지 & 루프**  
+    `should_continue(state)`가 “**툴콜이 있으면 → tool_node**, 없으면 → **END**”를 리턴. 이렇게 해서 `llm_call ↔ tool_node`가 **순환(cycle)** 하며 필요한 만큼 반복합니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+
+> 이 구조가 **LangGraph의 핵심 미감**입니다: “**상태를 바통처럼 돌리며, 조건에 따라 다시 같은 노드로 되감기**(루프)”.
+
+---
+
+# 2) LangGraph API 구조 (빠르게 잡는 큰 그림)
+
+- **Graph API (저수준, 명시적 그래프 구성)**
+    
+    - `StateGraph(StateType)`로 그래프 생성
+        
+    - `add_node(name, fn)`, `add_edge(src, dst)`, `add_conditional_edges(node, router_fn, [dsts])`
+        
+    - `START`, `END` 심볼 제공
+        
+    - `compile()` 후 `invoke()/stream()` 등으로 실행  
+        → **명시적으로 노드/에지/상태 흐름을 제어**하는 방식. 긴 수명·상태 보존·루프·분기 제어에 최적. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+        
+- **Functional API (단일 함수로 에이전트 작성)**  
+    같은 계산기 예제를 함수형 스타일로도 만들 수 있음. 복잡한 그래핑이 필요 없다면 더 간단. (Quickstart에서 Graph API/Functional API 둘 다 지원) [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/quickstart)
+    
+- **핵심 실행/운영 역량**
+    
+    - **Durable execution / Persistence**: 장시간·장애 복구 가능한 실행(중단점에서 재개). 상태/체크포인트 저장 방식 제공. [docs.langchain.com+1](https://docs.langchain.com/oss/python/langgraph/overview)
+        
+    - **Human-in-the-loop & Interrupts**: 중간 상태에서 사람 검토/수정, 일시 정지·재개 가능. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+        
+    - **Streaming**: 토큰/상태 스트리밍. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+        
+    - **Time travel**: 과거 체크포인트로 **상태 되감기**(디버깅/재실행에 유용). [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/use-time-travel)
+        
+    - **Memory**: 단기·장기 메모리 구성 가이드. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+        
+    - **Subgraphs**: 큰 그래프를 서브그래프로 모듈화. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+        
+- **개념적 배경 (Thinking in LangGraph)**  
+    “루프, 분기, 상태 공유”를 전제로 사고하라는 가이드. 에이전트/워크플로우를 DAG가 아닌 **사이클 포함 그래프**로 그리도록 사고 틀을 바꿔 줍니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/thinking-in-langgraph)
+    
+
+---
+
+# 3) LangGraph vs LangChain (무엇이 다르고 언제 쓰나)
+
+|비교 항목|LangChain|LangGraph|
+|---|---|---|
+|주 목적|LLM 앱의 **컴포넌트/통합**(모델·툴·프롬프트·체인/에이전트 등)|**상태 있는 장기 실행 에이전트 오케스트레이션**(그래프·루프·분기·복구)|
+|흐름 표현|보통 **선형/간단한 루프** 중심, 고수준 추상|**명시적 그래프**(노드/에지), **조건부 에지**, **사이클**|
+|상태 관리|체인/에이전트 내부 상태(간단)|**MessagesState 등 커스텀 상태**, 체크포인트·되감기, 내구성 실행|
+|운영 기능|통합과 추상화에 초점|**Durable execution, persistence, interrupts, time-travel** 등 운영 중심 기능|
+|학습 곡선|비교적 낮음(바로 쓰기 쉬움)|그래프·상태·라우팅 사고가 필요(유연·강력)|
+|적합 사례|간단한 RAG/체인, 툴콜 기반 에이전트의 빠른 시작|**다단계 의사결정**, 사람 개입, 장시간 작업, **복잡 루프/분기** 시나리오|
+
+- 공식 문서에서도 LangGraph는 **저수준 오케스트레이션과 런타임**에 집중하고, 시작 단계라면 LangChain의 **고수준 에이전트**를 권장한다고 밝힙니다. [docs.langchain.com](https://docs.langchain.com/oss/python/langgraph/overview)
+    
+- Medium 글 또한 LangGraph가 **DAG 한계를 넘는 사이클** 구현, **상태 기반 상호작용**에 초점을 둔다고 설명합니다. [Medium](https://becomingahacker.org/a-quick-introduction-to-langgraph-enhancing-llm-applications-with-cyclic-workflows-145f61f38747)
+    
+
+---
+
+## 보너스) 원문 글의 추가 포인트
+
+- **MessageGraph** 등 **채팅용 상태 프리셋**: 메시지 리스트를 상태로 삼아 자연스러운 대화형 루프를 구성. [Medium](https://becomingahacker.org/a-quick-introduction-to-langgraph-enhancing-llm-applications-with-cyclic-workflows-145f61f38747)
+    
+- **Chain-of-Table** 사례 링크: 표 추론을 반복적/점진적으로 다듬는 접근을 LangGraph로 구현한 예를 소개. [Medium](https://becomingahacker.org/a-quick-introduction-to-langgraph-enhancing-llm-applications-with-cyclic-workflows-145f61f38747)
+    
+- **예제 모음/노트북**: GitHub examples 디렉터리로 다수 샘플 제공. [Medium](https://becomingahacker.org/a-quick-introduction-to-langgraph-enhancing-llm-applications-with-cyclic-workflows-145f61f38747)
+    
+
+---
+
+## 한 줄 정리
+
+- **LangChain**으로 시작하고, **복잡한 루프·상태·중단/재개·사람 개입** 같은 **운영 난이도**가 필요해지면 **LangGraph**로 내려와 **그래프 기반 오케스트레이션**을 쓰면 됩니다. [docs.langchain.com+1](https://docs.langchain.com/oss/python/langgraph/overview)
+    
+
+원하시면, 위 Quickstart를 **여러 도구·조건 분기·인간 승인 단계**까지 확장한 “템플릿 코드”를 만들어 드릴게요. 어떤 시나리오(예: 다중 검색→요약→팩트체크→사람 승인→게시)로 보여드릴까요?
